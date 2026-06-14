@@ -1,0 +1,6 @@
+{
+  "name": "CBT Practice & Exam Simulator",
+  "description": "Interactive CBT exam simulator tailored for Nigerian students (UTME/WAEC/NECO) featuring local analytics, custom timers, and offline-compatible competitive leaderboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
