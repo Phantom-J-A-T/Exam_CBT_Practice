@@ -1,4 +1,5 @@
 export type SubjectType = 'maths' | 'english' | 'physics' | 'chemistry' | 'biology';
+export type ExamType = 'waec' | 'neco' | 'gce' | 'jamb';
 
 export interface Question {
   id: string;
@@ -8,11 +9,14 @@ export interface Question {
   options: string[]; // 4 options (A, B, C, D)
   correctOptionIndex: number; // 0 for A, 1 for B, 2 for C, 3 for D
   explanation: string;
+  examType?: ExamType;
+  examYear?: string;
 }
 
 export interface ExamSession {
   id: string;
   subject: SubjectType;
+  examType: ExamType;
   totalQuestions: number;
   answeredQuestions: Record<string, number>; // questionId -> selectedOptionIndex
   flaggedQuestions: string[]; // array of questionIds

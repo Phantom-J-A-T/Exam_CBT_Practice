@@ -1,12 +1,13 @@
 import { useState, useEffect, FormEvent } from 'react';
-import { 
-  BookOpen, Award, Trophy, Flame, User, Info, 
-  HelpCircle, ChevronLeft, ChevronRight, RotateCcw, 
+import {
+  BookOpen, Award, Trophy, Flame, User, Info,
+  HelpCircle, ChevronLeft, ChevronRight, RotateCcw,
   CheckCircle2, Calculator, Settings, X, LogOut, Check, Sparkles
 } from 'lucide-react';
 
-import { SubjectType, Question, ExamSession, UserStats, LeaderboardEntry } from './types';
+import { SubjectType, ExamType, Question, ExamSession, UserStats, LeaderboardEntry } from './types';
 import { getAllQuestions, getQuestionsForSubject } from './data/questions';
+import { fetchQuestionsForSubject } from './questionsService';
 import { getUpdatedLeaderboard } from './data/leaderboard';
 
 // Components
@@ -60,6 +61,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'exams' | 'leaderboard'>('exams');
 
   // --- COMPONENT LEVEL STATE ---
+  const [selectedExamType, setSelectedExamType] = useState<ExamType>('waec');
+  const [isFetchingQuestions, setIsFetchingQuestions] = useState(false);
   const [isOnboarding, setIsOnboarding] = useState(true);
   const [onboardForm, setOnboardForm] = useState({ name: '', school: '', state: 'Lagos' });
   const [selectedSubject, setSelectedSubject] = useState<SubjectType | null>(null);
@@ -69,7 +72,7 @@ export default function App() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [showCalculator, setShowCalculator] = useState(false);
   const [isAlertActive, setIsAlertActive] = useState(false);
-  
+
   // Review Mode state
   const [isReviewing, setIsReviewing] = useState(false);
   const [isTutoringActive, setIsTutoringActive] = useState(false);
@@ -112,7 +115,7 @@ export default function App() {
     return count > 0 ? sum / count : 0;
   })();
 
-  const leaderboardEntries = userProfile 
+  const leaderboardEntries = userProfile
     ? getUpdatedLeaderboard(userAverageScore, stats.testsCompleted, userProfile.name, userProfile.school)
     : [];
 
@@ -176,28 +179,36 @@ export default function App() {
   };
 
   // --- START EXAM SESSION ---
-  const handleStartSession = (subject: SubjectType, mode: 'simulation' | 'study') => {
-    const questions = getQuestionsForSubject(subject);
-    setSessionQuestions(questions);
-    setCurrentQuestionIndex(0);
-    setExamMode(mode);
+  const handleStartSession = async (subject: SubjectType, mode: 'simulation' | 'study') => {
+    setIsFetchingQuestions(true);
+    try {
+      const questions = await fetchQuestionsForSubject(subject, selectedExamType, 50);
+      setSessionQuestions(questions);
+      setCurrentQuestionIndex(0);
+      setExamMode(mode);
 
-    const initialSession: ExamSession = {
-      id: `session_${Date.now()}`,
-      subject,
-      totalQuestions: questions.length,
-      answeredQuestions: {},
-      flaggedQuestions: [],
-      timeSpentSeconds: 0,
-      timeRemainingSeconds: 40 * 60, // 40 minutes standard for subject CBT
-      score: 0,
-      percentage: 0,
-      timestamp: Date.now(),
-      completed: false
-    };
+      const initialSession: ExamSession = {
+        id: `session_${Date.now()}`,
+        subject,
+        examType: selectedExamType,
+        totalQuestions: questions.length,
+        answeredQuestions: {},
+        flaggedQuestions: [],
+        timeSpentSeconds: 0,
+        timeRemainingSeconds: 60 * 60, // 1 hour standard CBT
+        score: 0,
+        percentage: 0,
+        timestamp: Date.now(),
+        completed: false
+      };
 
-    setCbtSession(initialSession);
-    setIsReviewing(false);
+      setCbtSession(initialSession);
+      setIsReviewing(false);
+    } catch (err) {
+      console.error("Failed to fetch questions:", err);
+    } finally {
+      setIsFetchingQuestions(false);
+    }
   };
 
   // Timer tick update
@@ -208,7 +219,7 @@ export default function App() {
       return {
         ...prev,
         timeRemainingSeconds: secondsLeft,
-        timeSpentSeconds: (40 * 60) - secondsLeft
+        timeSpentSeconds: (60 * 60) - secondsLeft
       };
     });
   };
@@ -240,10 +251,10 @@ export default function App() {
       if (!prev) return null;
       const flagged = [...prev.flaggedQuestions];
       const isFlagged = flagged.includes(questionId);
-      
+
       return {
         ...prev,
-        flaggedQuestions: isFlagged 
+        flaggedQuestions: isFlagged
           ? flagged.filter(id => id !== questionId)
           : [...flagged, questionId]
       };
@@ -356,38 +367,62 @@ export default function App() {
     setShowExitSessionDialog(false);
   };
 
-  const handleRetakeExam = () => {
+  const handleRetakeExam = async () => {
     if (!cbtSession) return;
-    
-    const resetSession: ExamSession = {
-      id: `session_${Date.now()}`,
-      subject: cbtSession.subject,
-      totalQuestions: sessionQuestions.length,
-      answeredQuestions: {},
-      flaggedQuestions: [],
-      timeSpentSeconds: 0,
-      timeRemainingSeconds: 40 * 60, // 40 minutes standard for subject CBT
-      score: 0,
-      percentage: 0,
-      timestamp: Date.now(),
-      completed: false
-    };
+    setIsFetchingQuestions(true);
+    try {
+      const activeType = cbtSession.examType || selectedExamType;
+      const questions = await fetchQuestionsForSubject(cbtSession.subject, activeType, 50);
+      setSessionQuestions(questions);
+      setCurrentQuestionIndex(0);
 
-    setCbtSession(resetSession);
-    setIsReviewing(false);
-    setCurrentQuestionIndex(0);
-    setIsTutoringActive(false);
+      const resetSession: ExamSession = {
+        id: `session_${Date.now()}`,
+        subject: cbtSession.subject,
+        examType: activeType,
+        totalQuestions: questions.length,
+        answeredQuestions: {},
+        flaggedQuestions: [],
+        timeSpentSeconds: 0,
+        timeRemainingSeconds: 60 * 60, // 1 hour standard CBT
+        score: 0,
+        percentage: 0,
+        timestamp: Date.now(),
+        completed: false
+      };
+
+      setCbtSession(resetSession);
+      setIsReviewing(false);
+      setIsTutoringActive(false);
+    } catch (err) {
+      console.error("Retake questions retrieval failure:", err);
+    } finally {
+      setIsFetchingQuestions(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col antialiased">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col antialiased relative">
+      {/* Dynamic Exam-Hall Shuffling Past Papers Loader */}
+      {isFetchingQuestions && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[9999] flex flex-col items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full border border-slate-100 shadow-2xl flex flex-col items-center text-center animate-fade-in">
+            <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            <h3 className="font-sans font-bold text-slate-900 text-base mt-5">Shuffling examination papers...</h3>
+            <p className="font-sans text-xs text-slate-500 mt-2 leading-relaxed">
+              Connecting to the local West African Syllabus Database to draw randomized, real past questions. Feel the confidence!
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* --- ONBOARDING PORTAL --- */}
       {isOnboarding ? (
         <div className="flex-1 flex items-center justify-center p-4 bg-gradient-to-tr from-slate-900 via-slate-950 to-indigo-950 relative overflow-hidden">
           {/* Decorative shapes */}
           <div className="absolute top-1/4 -left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl"></div>
           <div className="absolute bottom-1/4 -right-1/4 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl"></div>
-          
+
           <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-100 p-8">
             <div className="text-center mb-6">
               <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg mx-auto mb-4 text-white">
@@ -476,25 +511,22 @@ export default function App() {
               <div className="flex items-center space-x-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
                 <button
                   onClick={() => setActiveTab('exams')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                    activeTab === 'exams' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${activeTab === 'exams' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                    }`}
                 >
                   Exams Launcher
                 </button>
                 <button
                   onClick={() => setActiveTab('dashboard')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                    activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                    }`}
                 >
                   My Progress
                 </button>
                 <button
                   onClick={() => setActiveTab('leaderboard')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                    activeTab === 'leaderboard' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${activeTab === 'leaderboard' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                    }`}
                 >
                   Scoreboard
                 </button>
@@ -506,11 +538,10 @@ export default function App() {
               <button
                 onClick={() => setShowCalculator(!showCalculator)}
                 title="Toggle calculator tool"
-                className={`p-2 rounded-lg border transition-all cursor-pointer ${
-                  showCalculator 
-                    ? 'bg-amber-500 border-amber-600 text-slate-950 shadow-md' 
+                className={`p-2 rounded-lg border transition-all cursor-pointer ${showCalculator
+                    ? 'bg-amber-500 border-amber-600 text-slate-950 shadow-md'
                     : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700'
-                }`}
+                  }`}
               >
                 <Calculator size={18} />
               </button>
@@ -539,6 +570,7 @@ export default function App() {
               isTutoringActive ? (
                 <CbtTutor
                   subject={cbtSession.subject}
+                  examType={cbtSession.examType}
                   sessionQuestions={sessionQuestions}
                   answeredQuestions={cbtSession.answeredQuestions}
                   onClose={() => setIsTutoringActive(false)}
@@ -547,285 +579,280 @@ export default function App() {
               ) : (
                 <div className="space-y-6">
                   {/* Active Exam Header */}
-                <div className="bg-white rounded-xl border border-slate-100 p-5 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div>
-                    <span className="text-[10px] bg-slate-100 text-slate-600 font-extrabold uppercase px-2.5 py-1 rounded-full font-mono">
-                      {SUBJECT_LABELS[cbtSession.subject]} • {examMode === 'simulation' ? 'STRICT TIMED MOCK' : 'SELF-STUDY MODE'}
-                    </span>
-                    <h2 className="text-xl font-bold font-sans text-slate-900 mt-2">
-                      {isReviewing ? 'CBT Result & Answers Review' : 'Practice Exam-Hall Simulation'}
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Always select the single best option. Use left and right buttons or the grid block to navigate.
-                    </p>
+                  <div className="bg-white rounded-xl border border-slate-100 p-5 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div>
+                      <span className="text-[10px] bg-indigo-50 text-indigo-700 font-extrabold uppercase px-2.5 py-1 rounded-full font-mono">
+                        {(cbtSession.examType || 'waec').toUpperCase()} LEVEL • {SUBJECT_LABELS[cbtSession.subject]} • {examMode === 'simulation' ? 'STRICT TIMED MOCK (60 MIN)' : 'SELF-STUDY MODE'}
+                      </span>
+                      <h2 className="text-xl font-bold font-sans text-slate-900 mt-2">
+                        {isReviewing ? 'CBT Result & Answers Review' : 'Practice Exam-Hall Simulation'}
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Always select the single best option. Use left and right buttons or the grid block to navigate.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center space-x-3">
+                      {/* Display Real Countdown Timer during exam mode */}
+                      {examMode === 'simulation' && !isReviewing && (
+                        <ExamTimer
+                          timeRemainingSeconds={cbtSession.timeRemainingSeconds}
+                          onTimeTick={handleTimeTick}
+                          onTimeout={handleTimeout}
+                          isActive={!isReviewing}
+                          onAlertTriggered={setIsAlertActive}
+                        />
+                      )}
+
+                      <button
+                        onClick={handleExitSession}
+                        className="px-4 py-2 border border-slate-200 text-slate-600 font-semibold rounded-lg hover:bg-slate-50 hover:text-rose-600 transition-colors text-xs font-mono tracking-wide cursor-pointer flex items-center gap-1.5"
+                      >
+                        <RotateCcw size={14} />
+                        {isReviewing ? 'EXIT SESSION' : 'QUIT PRACTICE'}
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center space-x-3">
-                    {/* Display Real Countdown Timer during exam mode */}
-                    {examMode === 'simulation' && !isReviewing && (
-                      <ExamTimer 
-                        timeRemainingSeconds={cbtSession.timeRemainingSeconds}
-                        onTimeTick={handleTimeTick}
-                        onTimeout={handleTimeout}
-                        isActive={!isReviewing}
-                        onAlertTriggered={setIsAlertActive}
-                      />
-                    )}
+                  {/* Main Exam Grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-                    <button
-                      onClick={handleExitSession}
-                      className="px-4 py-2 border border-slate-200 text-slate-600 font-semibold rounded-lg hover:bg-slate-50 hover:text-rose-600 transition-colors text-xs font-mono tracking-wide cursor-pointer flex items-center gap-1.5"
-                    >
-                      <RotateCcw size={14} />
-                      {isReviewing ? 'EXIT SESSION' : 'QUIT PRACTICE'}
-                    </button>
-                  </div>
-                </div>
+                    {/* LEFT & CENTER COLUMN: QUESTION FIELD */}
+                    <div className="lg:col-span-2 space-y-6">
+                      {/* Question Card */}
+                      <div className="bg-white rounded-xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-96">
 
-                {/* Main Exam Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  
-                  {/* LEFT & CENTER COLUMN: QUESTION FIELD */}
-                  <div className="lg:col-span-2 space-y-6">
-                    {/* Question Card */}
-                    <div className="bg-white rounded-xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-96">
-                      
-                      {/* Question Details header */}
-                      <div className="flex justify-between items-center pb-4 border-b border-slate-50">
-                        <span className="text-xs text-slate-400 font-bold font-mono">
-                          QUESTION {currentQuestionIndex + 1} OF {sessionQuestions.length}
-                        </span>
-                        
-                        <span className="text-xs text-slate-500 font-semibold bg-slate-50 px-2.5 py-1 rounded-md">
-                          Topic: {sessionQuestions[currentQuestionIndex]?.topic}
-                        </span>
-                      </div>
+                        {/* Question Details header */}
+                        <div className="flex justify-between items-center pb-4 border-b border-slate-50">
+                          <span className="text-xs text-slate-400 font-bold font-mono">
+                            QUESTION {currentQuestionIndex + 1} OF {sessionQuestions.length}
+                          </span>
 
-                      {/* Question Text */}
-                      <div className="my-6">
-                        <p className="text-sm md:text-base leading-relaxed text-slate-800 font-sans font-medium whitespace-pre-line">
-                          {sessionQuestions[currentQuestionIndex]?.questionText}
-                        </p>
-                      </div>
+                          <span className="text-xs text-slate-500 font-semibold bg-slate-50 px-2.5 py-1 rounded-md">
+                            Topic: {sessionQuestions[currentQuestionIndex]?.topic}
+                          </span>
+                        </div>
 
-                      {/* Multiple Choice Options List */}
-                      <div className="space-y-3">
-                        {sessionQuestions[currentQuestionIndex]?.options.map((option, idx) => {
-                          const optionLetters = ['A', 'B', 'C', 'D'];
-                          const isSelected = cbtSession.answeredQuestions[sessionQuestions[currentQuestionIndex].id] === idx;
-                          const isCorrect = sessionQuestions[currentQuestionIndex].correctOptionIndex === idx;
-                          
-                          // Styling condition based on states (answering vs reviewing)
-                          let optionStyle = 'border-slate-100 hover:bg-slate-50 hover:border-slate-350 bg-white';
-                          
-                          if (!isReviewing) {
-                            if (isSelected) {
-                              optionStyle = 'border-indigo-600 bg-indigo-50/60 ring-1 ring-indigo-500 text-slate-900';
-                            }
-                          } else { // Review mode
-                            if (isSelected && isCorrect) {
-                              optionStyle = 'border-emerald-500 bg-emerald-50/60 text-slate-900 ring-1 ring-emerald-500';
-                            } else if (isSelected && !isCorrect) {
-                              optionStyle = 'border-rose-500 bg-rose-50/60 text-rose-900 ring-1 ring-rose-500';
-                            } else if (isCorrect) {
-                              optionStyle = 'border-emerald-500 bg-emerald-50/60 text-slate-900 ring-1 ring-emerald-500 font-semibold animate-pulse';
-                            }
-                          }
-
-                          return (
-                            <button
-                              key={idx}
-                              onClick={() => handleSelectOption(sessionQuestions[currentQuestionIndex].id, idx)}
-                              disabled={isReviewing}
-                              className={`w-full text-left p-4 rounded-xl border text-slate-700 text-xs md:text-sm font-medium transition-all flex items-center gap-3 ${optionStyle} ${!isReviewing ? 'cursor-pointer' : 'cursor-default'}`}
-                            >
-                              <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
-                                isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
-                              }`}>
-                                {optionLetters[idx]}
-                              </span>
-                              <span className="flex-1">{option}</span>
-                              
-                              {isReviewing && isCorrect && (
-                                <span className="text-[10px] bg-emerald-600 text-white py-0.5 px-2 rounded font-mono uppercase font-bold">Passed</span>
-                              )}
-                              {isReviewing && isSelected && !isCorrect && (
-                                <span className="text-[10px] bg-rose-600 text-white py-0.5 px-2 rounded font-mono uppercase font-bold">Wrong</span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* EXPLANATIONS CONTAINER (Review mode or study mode feedback) */}
-                      {isReviewing && (
-                        <div className="mt-8 p-4 bg-indigo-50/60 border border-indigo-100 rounded-xl space-y-2">
-                          <h4 className="text-xs font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
-                            <Sparkles size={14} className="text-indigo-600 animate-pulse" />
-                            CBT Explains (UTME Syllabus Guide)
-                          </h4>
-                          <p className="text-xs text-slate-700 leading-relaxed font-sans font-medium">
-                            {sessionQuestions[currentQuestionIndex]?.explanation}
+                        {/* Question Text */}
+                        <div className="my-6">
+                          <p className="text-sm md:text-base leading-relaxed text-slate-800 font-sans font-medium whitespace-pre-line">
+                            {sessionQuestions[currentQuestionIndex]?.questionText}
                           </p>
+                        </div>
+
+                        {/* Multiple Choice Options List */}
+                        <div className="space-y-3">
+                          {sessionQuestions[currentQuestionIndex]?.options.map((option, idx) => {
+                            const optionLetters = ['A', 'B', 'C', 'D'];
+                            const isSelected = cbtSession.answeredQuestions[sessionQuestions[currentQuestionIndex].id] === idx;
+                            const isCorrect = sessionQuestions[currentQuestionIndex].correctOptionIndex === idx;
+
+                            // Styling condition based on states (answering vs reviewing)
+                            let optionStyle = 'border-slate-100 hover:bg-slate-50 hover:border-slate-350 bg-white';
+
+                            if (!isReviewing) {
+                              if (isSelected) {
+                                optionStyle = 'border-indigo-600 bg-indigo-50/60 ring-1 ring-indigo-500 text-slate-900';
+                              }
+                            } else { // Review mode
+                              if (isSelected && isCorrect) {
+                                optionStyle = 'border-emerald-500 bg-emerald-50/60 text-slate-900 ring-1 ring-emerald-500';
+                              } else if (isSelected && !isCorrect) {
+                                optionStyle = 'border-rose-500 bg-rose-50/60 text-rose-900 ring-1 ring-rose-500';
+                              } else if (isCorrect) {
+                                optionStyle = 'border-emerald-500 bg-emerald-50/60 text-slate-900 ring-1 ring-emerald-500 font-semibold animate-pulse';
+                              }
+                            }
+
+                            return (
+                              <button
+                                key={idx}
+                                onClick={() => handleSelectOption(sessionQuestions[currentQuestionIndex].id, idx)}
+                                disabled={isReviewing}
+                                className={`w-full text-left p-4 rounded-xl border text-slate-700 text-xs md:text-sm font-medium transition-all flex items-center gap-3 ${optionStyle} ${!isReviewing ? 'cursor-pointer' : 'cursor-default'}`}
+                              >
+                                <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
+                                  }`}>
+                                  {optionLetters[idx]}
+                                </span>
+                                <span className="flex-1">{option}</span>
+
+                                {isReviewing && isCorrect && (
+                                  <span className="text-[10px] bg-emerald-600 text-white py-0.5 px-2 rounded font-mono uppercase font-bold">Passed</span>
+                                )}
+                                {isReviewing && isSelected && !isCorrect && (
+                                  <span className="text-[10px] bg-rose-600 text-white py-0.5 px-2 rounded font-mono uppercase font-bold">Wrong</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* EXPLANATIONS CONTAINER (Review mode or study mode feedback) */}
+                        {isReviewing && (
+                          <div className="mt-8 p-4 bg-indigo-50/60 border border-indigo-100 rounded-xl space-y-2">
+                            <h4 className="text-xs font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                              <Sparkles size={14} className="text-indigo-600 animate-pulse" />
+                              CBT Explains (UTME Syllabus Guide)
+                            </h4>
+                            <p className="text-xs text-slate-700 leading-relaxed font-sans font-medium">
+                              {sessionQuestions[currentQuestionIndex]?.explanation}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Action controllers */}
+                        <div className="flex items-center justify-between pt-6 border-t border-slate-50 mt-8 gap-4">
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={handlePrevQuestion}
+                              disabled={currentQuestionIndex === 0}
+                              className={`flex items-center gap-1 px-3 py-2 border border-slate-200 rounded-lg text-slate-600 transition-colors text-xs font-semibold ${currentQuestionIndex === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'
+                                }`}
+                            >
+                              <ChevronLeft size={16} />
+                              PREV
+                            </button>
+
+                            <button
+                              onClick={handleNextQuestion}
+                              disabled={currentQuestionIndex === sessionQuestions.length - 1}
+                              className={`flex items-center gap-1 px-3 py-2 border border-slate-200 rounded-lg text-slate-600 transition-colors text-xs font-semibold ${currentQuestionIndex === sessionQuestions.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'
+                                }`}
+                            >
+                              NEXT
+                              <ChevronRight size={16} />
+                            </button>
+                          </div>
+
+                          {!isReviewing && (
+                            <button
+                              onClick={() => handleToggleFlag(sessionQuestions[currentQuestionIndex].id)}
+                              className={`text-xs px-3 py-2 rounded-lg font-semibold transition-colors border cursor-pointer ${cbtSession.flaggedQuestions.includes(sessionQuestions[currentQuestionIndex].id)
+                                  ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                }`}
+                            >
+                              🚩 {cbtSession.flaggedQuestions.includes(sessionQuestions[currentQuestionIndex].id) ? 'FLAGGED (REVIEW)' : 'FLAG FOR REV'}
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => {
+                              if (isReviewing) {
+                                handleExitSession();
+                              } else {
+                                handleSubmitSession(false);
+                              }
+                            }}
+                            className={`text-xs font-bold py-2.5 px-5 rounded-lg shadow-sm font-mono tracking-wider cursor-pointer ${isReviewing
+                                ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                              }`}
+                          >
+                            {isReviewing ? 'DASHBOARD' : 'SUBMIT EXAM'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* RIGHT COLUMN: EXAMINATION NAV BLOCK */}
+                    <div className="space-y-6">
+                      {/* Score summary in review mode */}
+                      {isReviewing && (
+                        <div className="bg-gradient-to-tr from-slate-900 via-slate-950 to-indigo-950 rounded-xl p-5 text-white text-center shadow-lg border border-slate-800">
+                          <Award className="mx-auto text-yellow-400 mb-2" size={32} />
+                          <h3 className="font-bold text-sm tracking-widest uppercase text-slate-400">YOUR PERFORMANCE</h3>
+
+                          <div className="text-5xl font-extrabold font-mono text-indigo-300 my-3">
+                            {cbtSession.percentage}%
+                          </div>
+
+                          <p className="text-xs text-slate-300 mt-1">
+                            You solved <span className="font-bold text-white">{cbtSession.score}</span> correct out of <span className="font-bold text-white">{sessionQuestions.length}</span> questions.
+                          </p>
+
+                          <div className="mt-4 pt-4 border-t border-slate-800 text-xs text-indigo-200 flex justify-between items-center font-mono">
+                            <span>Subject: {SUBJECT_LABELS[cbtSession.subject]}</span>
+                            <span>Time Spent: {Math.floor(cbtSession.timeSpentSeconds / 60)}m</span>
+                          </div>
+
+                          {/* ENTER DYNAMIC AI TUTORING ACTION */}
+                          <button
+                            onClick={() => setIsTutoringActive(true)}
+                            className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-mono font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-500 shadow-sm"
+                          >
+                            <Sparkles size={13} className="text-amber-300 fill-amber-300" />
+                            ENTER AI STUDY ROOM
+                          </button>
                         </div>
                       )}
 
-                      {/* Action controllers */}
-                      <div className="flex items-center justify-between pt-6 border-t border-slate-50 mt-8 gap-4">
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={handlePrevQuestion}
-                            disabled={currentQuestionIndex === 0}
-                            className={`flex items-center gap-1 px-3 py-2 border border-slate-200 rounded-lg text-slate-600 transition-colors text-xs font-semibold ${
-                              currentQuestionIndex === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'
-                            }`}
-                          >
-                            <ChevronLeft size={16} />
-                            PREV
-                          </button>
+                      {/* Navigation Block representation */}
+                      <div className="bg-white rounded-xl border border-slate-100 p-6 shadow-sm">
+                        <h3 className="font-semibold text-slate-900 text-sm border-b border-slate-100 pb-3 mb-4">
+                          Question Matrix Grid
+                        </h3>
 
-                          <button
-                            onClick={handleNextQuestion}
-                            disabled={currentQuestionIndex === sessionQuestions.length - 1}
-                            className={`flex items-center gap-1 px-3 py-2 border border-slate-200 rounded-lg text-slate-600 transition-colors text-xs font-semibold ${
-                              currentQuestionIndex === sessionQuestions.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'
-                            }`}
-                          >
-                            NEXT
-                            <ChevronRight size={16} />
-                          </button>
-                        </div>
+                        <div className="grid grid-cols-5 gap-2">
+                          {sessionQuestions.map((q, idx) => {
+                            const isAnswered = cbtSession.answeredQuestions[q.id] !== undefined;
+                            const isFlagged = cbtSession.flaggedQuestions.includes(q.id);
+                            const isActive = currentQuestionIndex === idx;
 
-                        {!isReviewing && (
-                          <button
-                            onClick={() => handleToggleFlag(sessionQuestions[currentQuestionIndex].id)}
-                            className={`text-xs px-3 py-2 rounded-lg font-semibold transition-colors border cursor-pointer ${
-                              cbtSession.flaggedQuestions.includes(sessionQuestions[currentQuestionIndex].id)
-                                ? 'bg-amber-100 text-amber-800 border-amber-300'
-                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                            }`}
-                          >
-                            🚩 {cbtSession.flaggedQuestions.includes(sessionQuestions[currentQuestionIndex].id) ? 'FLAGGED (REVIEW)' : 'FLAG FOR REV'}
-                          </button>
-                        )}
+                            let gridStyle = 'border-slate-200 text-slate-600 hover:border-slate-400';
 
-                        <button
-                          onClick={() => {
-                            if (isReviewing) {
-                              handleExitSession();
-                            } else {
-                              handleSubmitSession(false);
+                            if (isAnswered) {
+                              gridStyle = 'bg-slate-800 text-white border-slate-800 hover:bg-slate-750';
                             }
-                          }}
-                          className={`text-xs font-bold py-2.5 px-5 rounded-lg shadow-sm font-mono tracking-wider cursor-pointer ${
-                            isReviewing 
-                              ? 'bg-indigo-600 hover:bg-indigo-700 text-white' 
-                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                          }`}
-                        >
-                          {isReviewing ? 'DASHBOARD' : 'SUBMIT EXAM'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* RIGHT COLUMN: EXAMINATION NAV BLOCK */}
-                  <div className="space-y-6">
-                    {/* Score summary in review mode */}
-                    {isReviewing && (
-                      <div className="bg-gradient-to-tr from-slate-900 via-slate-950 to-indigo-950 rounded-xl p-5 text-white text-center shadow-lg border border-slate-800">
-                        <Award className="mx-auto text-yellow-400 mb-2" size={32} />
-                        <h3 className="font-bold text-sm tracking-widest uppercase text-slate-400">YOUR PERFORMANCE</h3>
-                        
-                        <div className="text-5xl font-extrabold font-mono text-indigo-300 my-3">
-                          {cbtSession.percentage}%
+                            if (isFlagged) {
+                              gridStyle = 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-250';
+                            }
+
+                            if (isActive) {
+                              gridStyle += ' ring-2 ring-indigo-600 ring-offset-2 scale-105';
+                            }
+
+                            return (
+                              <button
+                                key={q.id}
+                                onClick={() => setCurrentQuestionIndex(idx)}
+                                className={`w-full h-9 rounded-md border text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer ${gridStyle}`}
+                              >
+                                {(idx + 1).toString().padStart(2, '0')}
+                              </button>
+                            );
+                          })}
                         </div>
 
-                        <p className="text-xs text-slate-300 mt-1">
-                          You solved <span className="font-bold text-white">{cbtSession.score}</span> correct out of <span className="font-bold text-white">{sessionQuestions.length}</span> questions.
-                        </p>
-
-                        <div className="mt-4 pt-4 border-t border-slate-800 text-xs text-indigo-200 flex justify-between items-center font-mono">
-                          <span>Subject: {SUBJECT_LABELS[cbtSession.subject]}</span>
-                          <span>Time Spent: {Math.floor(cbtSession.timeSpentSeconds / 60)}m</span>
-                        </div>
-
-                        {/* ENTER DYNAMIC AI TUTORING ACTION */}
-                        <button
-                          onClick={() => setIsTutoringActive(true)}
-                          className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-mono font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-500 shadow-sm"
-                        >
-                          <Sparkles size={13} className="text-amber-300 fill-amber-300" />
-                          ENTER AI STUDY ROOM
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Navigation Block representation */}
-                    <div className="bg-white rounded-xl border border-slate-100 p-6 shadow-sm">
-                      <h3 className="font-semibold text-slate-900 text-sm border-b border-slate-100 pb-3 mb-4">
-                        Question Matrix Grid
-                      </h3>
-
-                      <div className="grid grid-cols-5 gap-2">
-                        {sessionQuestions.map((q, idx) => {
-                          const isAnswered = cbtSession.answeredQuestions[q.id] !== undefined;
-                          const isFlagged = cbtSession.flaggedQuestions.includes(q.id);
-                          const isActive = currentQuestionIndex === idx;
-
-                          let gridStyle = 'border-slate-200 text-slate-600 hover:border-slate-400';
-                          
-                          if (isAnswered) {
-                            gridStyle = 'bg-slate-800 text-white border-slate-800 hover:bg-slate-750';
-                          }
-
-                          if (isFlagged) {
-                            gridStyle = 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-250';
-                          }
-
-                          if (isActive) {
-                            gridStyle += ' ring-2 ring-indigo-600 ring-offset-2 scale-105';
-                          }
-
-                          return (
-                            <button
-                              key={q.id}
-                              onClick={() => setCurrentQuestionIndex(idx)}
-                              className={`w-full h-9 rounded-md border text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer ${gridStyle}`}
-                            >
-                              {(idx + 1).toString().padStart(2, '0')}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Key Indicators */}
-                      <div className="grid grid-cols-3 gap-2 mt-6 pt-4 border-t border-slate-50 text-[10px] font-mono text-slate-500 uppercase tracking-widest">
-                        <div className="flex items-center gap-1">
-                          <span className="w-2.5 h-2.5 bg-slate-100 border border-slate-300 rounded"></span>
-                          <span>Unvisited</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="w-2.5 h-2.5 bg-slate-800 rounded"></span>
-                          <span>Solved</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="w-2.5 h-2.5 bg-amber-100 border border-amber-300 rounded"></span>
-                          <span>Flagged</span>
+                        {/* Key Indicators */}
+                        <div className="grid grid-cols-3 gap-2 mt-6 pt-4 border-t border-slate-50 text-[10px] font-mono text-slate-500 uppercase tracking-widest">
+                          <div className="flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 bg-slate-100 border border-slate-300 rounded"></span>
+                            <span>Unvisited</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 bg-slate-800 rounded"></span>
+                            <span>Solved</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 bg-amber-100 border border-amber-300 rounded"></span>
+                            <span>Flagged</span>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            )
-          ) : (
+              )
+            ) : (
               /* --- OUT OF SESSION: NORMAL MODE PAGES --- */
               <>
                 {/* Dashboard Tab */}
                 {activeTab === 'dashboard' && (
-                  <Dashboard 
-                    stats={stats} 
+                  <Dashboard
+                    stats={stats}
                     onResetStats={handleResetStats}
                     onSelectSubject={(subj) => {
                       setSelectedSubject(subj);
@@ -842,20 +869,20 @@ export default function App() {
                 {/* Simulated Mock Launcher Tab */}
                 {activeTab === 'exams' && (
                   <div className="space-y-6">
-                    
+
                     {/* Intro card & banner */}
                     <div className="bg-gradient-to-tr from-slate-900 via-slate-950 to-indigo-950 rounded-2xl p-6 md:p-8 text-white relative overflow-hidden shadow-lg border border-slate-800">
                       <div className="absolute -top-1/4 -right-1/4 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl"></div>
-                      
+
                       <div className="max-w-2xl">
                         <span className="text-[10px] font-extrabold uppercase font-mono bg-indigo-600 text-white rounded-full px-3 py-1 tracking-wide">
                           Nigerian Syllabus Integrated Exam Hub
                         </span>
-                        
+
                         <h2 className="text-2xl md:text-3xl font-black mt-4 tracking-tight leading-tight">
                           Select a Subject & Master Your Pace
                         </h2>
-                        
+
                         <p className="text-slate-300 text-xs md:text-sm mt-2 leading-relaxed font-sans">
                           Practicing under exact test constraints reduces failure rates. Every exam counts towards your cumulative ranking on the national merit scoreboard.
                         </p>
@@ -867,20 +894,19 @@ export default function App() {
                       {(['maths', 'english', 'physics', 'chemistry', 'biology'] as SubjectType[]).map(subject => {
                         const styleClass = SUBJECT_THEMES[subject];
                         const countOfTests = (stats[`${subject}_scores` as keyof UserStats] as number[]).length;
-                        
+
                         return (
-                          <div 
+                          <div
                             key={subject}
-                            className={`bg-white rounded-xl border border-slate-100 p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between ${
-                              selectedSubject === subject ? 'ring-2 ring-indigo-600 scale-[1.01]' : ''
-                            }`}
+                            className={`bg-white rounded-xl border border-slate-100 p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between ${selectedSubject === subject ? 'ring-2 ring-indigo-600 scale-[1.01]' : ''
+                              }`}
                           >
                             <div>
                               <div className="flex justify-between items-start mb-3">
                                 <h3 className="font-bold text-slate-900 border-l-4 pl-2.5 leading-snug select-none text-base">
                                   {SUBJECT_LABELS[subject]}
                                 </h3>
-                                
+
                                 <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-2.5 py-1 rounded">
                                   {countOfTests} exams done
                                 </span>
@@ -892,26 +918,57 @@ export default function App() {
                             </div>
 
                             {selectedSubject === subject ? (
-                              <div className="space-y-2 animate-fade-in">
-                                <button
-                                  onClick={() => handleStartSession(subject, 'simulation')}
-                                  className="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-mono font-bold tracking-wider py-2.5 px-3 rounded-lg shadow-sm transition-colors cursor-pointer"
-                                >
-                                  LAUNCH TIMED EXAM (CBT) ⏱️
-                                </button>
-                                <button
-                                  onClick={() => handleStartSession(subject, 'study')}
-                                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-mono font-bold tracking-wider py-2 px-3 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  UNTIMED PRACTICE (REVISION)
-                                </button>
-                                <button
-                                  onClick={() => setSelectedSubject(null)}
-                                  className="w-full text-[10px] font-mono font-bold text-slate-400 hover:text-slate-600 transition-colors py-1 cursor-pointer text-center"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
+                              isFetchingQuestions ? (
+                                <div className="flex flex-col items-center justify-center py-5 bg-slate-50 border border-slate-100 rounded-lg w-full">
+                                  <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                                  <span className="text-[10px] font-mono text-slate-500 mt-2">Setting up examination hall...</span>
+                                </div>
+                              ) : (
+                                <div className="space-y-3 animate-fade-in w-full">
+                                  {/* Segmented Exam Type Selector */}
+                                  <div>
+                                    <label className="block text-[9px] font-mono font-extrabold text-slate-400 mb-1.5 uppercase tracking-wider text-center">
+                                      Select examination style
+                                    </label>
+                                    <div className="grid grid-cols-4 gap-1 bg-slate-100 p-1 rounded-lg">
+                                      {(['waec', 'neco', 'gce', 'jamb'] as ExamType[]).map(type => (
+                                        <button
+                                          key={type}
+                                          type="button"
+                                          onClick={() => setSelectedExamType(type)}
+                                          className={`py-1 text-[10px] font-mono font-bold rounded transition-all cursor-pointer uppercase text-center ${selectedExamType === type
+                                              ? 'bg-indigo-600 text-white shadow-sm'
+                                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                                            }`}
+                                        >
+                                          {type}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1.5 w-full">
+                                    <button
+                                      onClick={() => handleStartSession(subject, 'simulation')}
+                                      className="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-mono font-bold tracking-wider py-2.5 px-3 rounded-lg shadow-sm transition-colors cursor-pointer"
+                                    >
+                                      LAUNCH TIMED EXAM (CBT) ⏱️
+                                    </button>
+                                    <button
+                                      onClick={() => handleStartSession(subject, 'study')}
+                                      className="w-full bg-slate-100 hover:bg-slate-200 text-slate-850 text-xs font-mono font-bold tracking-wider py-2 px-3 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      UNTIMED PRACTICE (REVISION)
+                                    </button>
+                                    <button
+                                      onClick={() => setSelectedSubject(null)}
+                                      className="w-full text-[10px] font-mono font-bold text-slate-400 hover:text-slate-600 transition-colors py-1 cursor-pointer text-center"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              )
                             ) : (
                               <button
                                 onClick={() => setSelectedSubject(subject)}
@@ -940,7 +997,7 @@ export default function App() {
               <span className="text-yellow-500">⏳</span>
               Unfinished Answers!
             </h3>
-            
+
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
               You have answered <span className="font-bold text-slate-900">{Object.keys(cbtSession.answeredQuestions).length}</span> questions out of <span className="font-bold text-slate-900">{cbtSession.totalQuestions}</span>. Are you sure you want to grade and submit your exam paper now?
             </p>
@@ -971,7 +1028,7 @@ export default function App() {
               <span className="text-rose-500">🛑</span>
               Exit Active Practice?
             </h3>
-            
+
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
               Are you sure you want to stop? Your current progress on this mock exam will be lost and your scores will not be recorded.
             </p>
@@ -1002,7 +1059,7 @@ export default function App() {
               <span className="text-amber-500">👤</span>
               Change Candidate Profile?
             </h3>
-            
+
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
               This will log you out of the CBT Hub. Your offline record of scores and current study streak will be reset.
             </p>
@@ -1033,7 +1090,7 @@ export default function App() {
               <span className="text-rose-500">♻️</span>
               Reset Exam Progress?
             </h3>
-            
+
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
               This will permanently delete all your registered scores, test analytics, and streak counts. This action cannot be undone.
             </p>

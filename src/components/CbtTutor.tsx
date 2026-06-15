@@ -12,10 +12,11 @@ import {
   ChevronRight, 
   GraduationCap
 } from 'lucide-react';
-import { Question, SubjectType } from '../types';
+import { Question, SubjectType, ExamType } from '../types';
 
 interface CbtTutorProps {
   subject: SubjectType;
+  examType: ExamType;
   sessionQuestions: Question[];
   answeredQuestions: Record<string, number>;
   onClose: () => void;
@@ -37,8 +38,16 @@ const SUBJECT_LABELS: Record<string, string> = {
   biology: 'Biology'
 };
 
+const EXAM_BODY_LABELS: Record<string, string> = {
+  waec: "WAEC",
+  neco: "NECO",
+  gce: "GCE",
+  jamb: "JAMB"
+};
+
 export default function CbtTutor({
   subject,
+  examType,
   sessionQuestions,
   answeredQuestions,
   onClose,
@@ -64,7 +73,7 @@ export default function CbtTutor({
       
       const welcomePrompt = {
         role: 'user',
-        content: `Connect to my exam, welcome me warmly as a supportive Nigerian CBT study coach, share a breakdown analysis of my performance (summarizing which specific topics I was correct in, and which ones I need study-room help with), and ask how we can start learning together!`
+        content: `Connect to my ${EXAM_BODY_LABELS[examType] || 'past-paper'} mock session, welcome me warmly as a supportive Nigerian CBT study coach, share a breakdown analysis of my performance (summarizing which specific topics I was correct in, and which ones I need study-room help with), and ask how we can start learning together!`
       };
 
       try {
@@ -73,6 +82,7 @@ export default function CbtTutor({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             subject,
+            examType,
             questions: sessionQuestions,
             answeredQuestions,
             messages: [welcomePrompt]
@@ -101,7 +111,7 @@ export default function CbtTutor({
     };
 
     welcomeUserAndDiagnosticSummary();
-  }, [subject, sessionQuestions, answeredQuestions]);
+  }, [subject, examType, sessionQuestions, answeredQuestions]);
 
   // Standard interactive message submission
   const handleSendMessage = async (customText?: string) => {
@@ -133,6 +143,7 @@ export default function CbtTutor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           subject,
+          examType,
           questions: sessionQuestions,
           answeredQuestions,
           messages: updatedHistory
